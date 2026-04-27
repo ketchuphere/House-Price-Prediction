@@ -1,0 +1,62 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# House Price Prediction — Full-Stack Docker Compose
+#
+# Services:
+#   api      — FastAPI backend (Python/scikit-learn)  → internal :8000
+#   frontend — nginx serving React build + reverse proxy → public :80
+#
+# Usage:
+#   docker compose up --build           # first run (trains model if not present)
+#   docker compose up                   # subsequent runs (model cached in volume)
+#   curl http://localhost/health        # health check via nginx
+#   open http://localhost               # React UI
+#   open http://localhost/docs          # Swagger UI
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI ML Backend ──────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: house_price_api
+    expose:
+      - "8000"          # internal only; nginx proxies to this
+    environment:
+      - DATA_PATH=/app/data/data.csv
+      - MODEL_DIR=/app/saved_models
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - saved_models:/app/saved_models  # persist trained model across restarts
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  # ── React Frontend + nginx reverse proxy ────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: house_price_frontend
+    ports:
+      - "80:80"           # public HTTP
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro   # live-reload nginx config
+    restart: unless-stopped
+
+volumes:
+  saved_models:
+    driver: local
